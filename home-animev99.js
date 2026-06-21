@@ -663,8 +663,13 @@
     const CAT_ICONS_MAP = Object.fromEntries(CATS_CFG.map(c => [c.name, c.icon]));
 
     let hCatEnabled = localStorage.getItem('h_enabled') === '1';
+
+    // FIX: Guardar el valor por defecto explícitamente en el localStorage si no existe
     const autoplayRaw = localStorage.getItem('autoplay_enabled');
-    let autoplayEnabled = autoplayRaw !== '0';
+    let autoplayEnabled = autoplayRaw !== '0'; // Por defecto true
+    if (autoplayRaw === null) {
+        localStorage.setItem('autoplay_enabled', '1');
+    }
     const saveAutoplayEnabled = () => localStorage.setItem('autoplay_enabled', autoplayEnabled ? '1' : '0');
 
     const isH = item => {
@@ -2449,4 +2454,3 @@
 
     init();
 })();
-home-animev7

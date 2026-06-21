@@ -297,17 +297,46 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
     $('episodes-list').style.display = 'none';
     document.querySelector('.seasons-wrap').style.display = 'none';
     const sHeader = $('serie-header');
-    if (sHeader) sHeader.style.display = 'none';
+    const playerHeader = document.getElementById('player-header');
+    if (SERIE.type === 'movie') {
+        // Para películas: el header principal (con botón volver al catálogo) permanece visible
+        // Ocultar botón de reset que no aplica
+        if (sHeader) sHeader.style.display = 'flex';
+        if (playerHeader) {
+            // Mostrar el player-header pero sin el botón cerrar (el header principal lo reemplaza)
+            playerHeader.style.display = '';
+        }
+        const resetBtn = $('btn-serie-reset');
+        if (resetBtn) resetBtn.style.display = 'none';
+    } else {
+        // Para series: ocultar header principal, mostrar el del player
+        if (sHeader) sHeader.style.display = 'none';
+        if (playerHeader) playerHeader.style.display = '';
+    }
 
-    // Ajustar label del botón cerrar si es película
+    // Ajustar botón cerrar player
     const closeBtn = $('btn-close-player');
     if (closeBtn) {
-        closeBtn.setAttribute('aria-label', SERIE.type === 'movie' ? 'Volver al catálogo' : 'Volver a episodios');
+        if (SERIE.type === 'movie') {
+            // Para películas: el botón de volver está en el serie-header, ocultar este
+            closeBtn.style.display = 'none';
+        } else {
+            closeBtn.style.display = '';
+            closeBtn.setAttribute('aria-label', 'Volver a episodios');
+        }
+    }
+
+    // Ocultar también el player-ep-title en películas (ya se muestra en el serie-header)
+    const playerEpTitle = $('player-ep-title');
+    if (playerEpTitle) {
+        playerEpTitle.style.display = SERIE.type === 'movie' ? 'none' : '';
     }
 
     // Actualizar título
     if (SERIE.type === 'movie') {
-        $('player-ep-title').textContent = currentEpisode.title;
+        // En películas el título va en el serie-header (player-ep-title está oculto)
+        const headerTitle = $('header-title');
+        if (headerTitle) headerTitle.textContent = SERIE.title;
     } else {
         $('player-ep-title').textContent = `Ep. ${epNum} · ${currentEpisode.title}`;
     }
@@ -352,13 +381,18 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
     }
 
     // Configurar botones
-    const isMovie = currentEpisode.type === 'movie';
+    const isMovie = SERIE.type === 'movie' || currentEpisode.type === 'movie';
 
     if (isMovie) {
         if (prevBtn) prevBtn.style.display = 'none';
         if (nextBtn) nextBtn.style.display = 'none';
-        // Si hay un divisor o barra, también podríamos ocultarla si tuviera ID/clase
+        // Ocultar el footer completo en películas
+        const playerFooter = document.getElementById('player-footer');
+        if (playerFooter) playerFooter.style.display = 'none';
     } else {
+        // Restaurar footer para series
+        const playerFooter = document.getElementById('player-footer');
+        if (playerFooter) playerFooter.style.display = '';
         if (prevBtn) {
             prevBtn.style.display = prevEp ? '' : 'none';
             prevBtn.disabled = !prevEp;
@@ -1258,7 +1292,23 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
             };
         }
 
-        wolfInstance = new window.WolfPlayer('#wolf-player-container', wolfConfig);
+        let wolfInitOk = false;
+        try {
+            wolfInstance = new window.WolfPlayer('#wolf-player-container', wolfConfig);
+            wolfInitOk = true;
+        } catch (wolfErr) {
+            console.error('❌ WolfPlayer falló al inicializar:', wolfErr);
+            wolfInstance = null;
+        }
+
+        if (!wolfInitOk) {
+            // WolfPlayer lanzó excepción — limpiar el container y usar fallback nativo
+            console.warn('⚠️ Usando fallback nativo por fallo de WolfPlayer');
+            container.innerHTML = '';
+            _buildNativePlayer(container, wrap, url, poster, videoType, mainLoader, server, requestId, hideLoader);
+            return;
+        }
+
         setTimeout(hideLoader, 2000);
 
         // Forzar precarga apenas el contenedor genere la etiqueta nativa (evitamos fallos API de WolfPlayer)
@@ -1268,6 +1318,20 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
             const v = container.querySelector('video');
             if (v) {
                 clearInterval(preloadIv);
+
+                // Validar que WolfPlayer montó correctamente su skin (debe haber un wrapper de controles)
+                const hasSkin = container.querySelector('.wolf-player, .wolf-controls, [class*="wolf"]');
+                if (!hasSkin && container.children.length <= 1) {
+                    // Solo hay el <video> crudo, WolfPlayer no montó la UI — usar fallback
+                    console.warn('⚠️ WolfPlayer no montó skin, usando fallback nativo');
+                    if (wolfInstance && typeof wolfInstance.destroy === 'function') {
+                        try { wolfInstance.destroy(); } catch(e) {}
+                    }
+                    wolfInstance = null;
+                    container.innerHTML = '';
+                    _buildNativePlayer(container, wrap, url, poster, videoType, mainLoader, server, requestId, hideLoader);
+                    return;
+                }
 
                 // Configuración crítica antes del load
                 if (url.includes('pixeldrain.com')) {
@@ -1289,6 +1353,14 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
                 }, { once: true });
             } else if (++preloadAttempts > 40) {
                 clearInterval(preloadIv);
+                // Después de 2 segundos sin <video>, WolfPlayer no montó nada — fallback
+                console.warn('⚠️ WolfPlayer no generó <video> tras 2s, usando fallback nativo');
+                if (wolfInstance && typeof wolfInstance.destroy === 'function') {
+                    try { wolfInstance.destroy(); } catch(e) {}
+                }
+                wolfInstance = null;
+                container.innerHTML = '';
+                _buildNativePlayer(container, wrap, url, poster, videoType, mainLoader, server, requestId, hideLoader);
             }
         }, 50);
 
@@ -1296,7 +1368,9 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
             if (requestId && requestId !== renderCount) return;
 
             const v = container.querySelector('video');
-            if (v) {
+            if (!v) return; // Ya manejado por el preloadIv timeout
+
+            {
 
                 v.addEventListener('error', (e) => {
                     if (requestId && requestId !== renderCount) return;
@@ -1438,95 +1512,103 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
             }
         }, 1000);
     } else {
-        const video = document.createElement('video');
-        video.controls = true;
-        video.preload = isMobile ? 'metadata' : 'auto';
-        video.poster = poster;
-        video.autoplay = window._isAutoplay || false;
-        video.playsInline = true;
-        video.style.cssText = 'width:100%;height:100%;background:#000;object-fit:contain';
+        _buildNativePlayer(container, wrap, url, poster, videoType, mainLoader, server, requestId, hideLoader);
+    }
+}
 
-        if (videoType === 'hls' || isHLS(url)) {
-            if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = url;
-            } else if (typeof window.Hls !== 'undefined' && window.Hls.isSupported()) {
-                const hls = new window.Hls({
-                    maxBufferLength: isMobile ? 15 : 45,
-                    maxMaxBufferLength: isMobile ? 30 : 90,
-                    startLevel: isMobile ? 0 : -1
-                });
-                hls.loadSource(url);
-                hls.attachMedia(video);
-                hlsInstance = hls;
-            } else {
-                video.src = url;
-            }
+// ── Reproductor nativo de fallback (usado cuando WolfPlayer no está o falla) ──
+function _buildNativePlayer(container, wrap, url, poster, videoType, mainLoader, server, requestId, hideLoader) {
+    const video = document.createElement('video');
+    video.controls = true;
+    video.preload = GLOBAL_IS_MOBILE ? 'metadata' : 'auto';
+    video.poster = poster;
+    video.autoplay = window._isAutoplay || false;
+    video.playsInline = true;
+    video.style.cssText = 'width:100%;height:100%;background:#000;object-fit:contain';
+
+    if (videoType === 'hls' || isHLS(url)) {
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+        } else if (typeof window.Hls !== 'undefined' && window.Hls.isSupported()) {
+            const hls = new window.Hls({
+                maxBufferLength: GLOBAL_IS_MOBILE ? 15 : 45,
+                maxMaxBufferLength: GLOBAL_IS_MOBILE ? 30 : 90,
+                startLevel: GLOBAL_IS_MOBILE ? 0 : -1
+            });
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hlsInstance = hls;
         } else {
             video.src = url;
         }
-
-        container.appendChild(video);
-        video.addEventListener('canplay', () => {
-            hideLoader();
-            video.play().catch(() => { });
-            if (window._pendingFullscreen) {
-                window._pendingFullscreen = false;
-                if (video.requestFullscreen) video.requestFullscreen().catch(()=>{});
-            }
-        }, { once: true });
-        
-        let saveInterval = null;
-        video._resumeChecked = false;
-        
-        const checkResumeFallback = () => {
-            if (requestId && requestId !== renderCount) return;
-            if (video._resumeChecked) return;
-            const saved = getSavedTime();
-            if (!saved || saved <= 0) {
-                video._resumeChecked = true;
-                return;
-            }
-            video._resumeChecked = true;
-            const currentTime = video.currentTime || 0;
-            if (saved > 30 && (currentTime < 60 || Math.abs(currentTime - saved) > 60)) {
-                showResumeToast(saved, () => {
-                    const jump = () => { video.currentTime = saved; video.play(); };
-                    if (video.readyState >= 1) jump();
-                    else video.addEventListener('loadedmetadata', jump, { once: true });
-                }, () => { video.play(); });
-            }
-        };
-        video.addEventListener('loadedmetadata', checkResumeFallback);
-        video.addEventListener('canplay', checkResumeFallback);
-        checkResumeFallback();
-
-        const doSaveFallback = () => {
-            if (requestId && requestId !== renderCount) return;
-            if (video.duration > 0) saveProgress(video.currentTime, video.duration);
-        };
-
-        video.addEventListener('play', () => {
-            if (requestId && requestId !== renderCount) return;
-            if (!saveInterval) saveInterval = setInterval(doSaveFallback, 3000);
-        });
-        video.addEventListener('pause', doSaveFallback);
-        video.addEventListener('seeked', doSaveFallback);
-        video.addEventListener('timeupdate', () => {
-            if (requestId && requestId !== renderCount) return;
-            if (!video._lastSave || Date.now() - video._lastSave > 5000) {
-                video._lastSave = Date.now();
-                doSaveFallback();
-            }
-        });
-        video.addEventListener('ended', () => {
-            if (requestId && requestId !== renderCount) return;
-            clearInterval(saveInterval);
-            const key = resumeKey();
-            if (key) localStorage.removeItem(key);
-            handleAutoplayNext();
-        });
-        setTimeout(() => hideLoader(), 10000);
+    } else {
+        video.src = url;
     }
+
+    container.appendChild(video);
+    video.addEventListener('canplay', () => {
+        if (hideLoader) hideLoader();
+        if (mainLoader) mainLoader.hide();
+        video.play().catch(() => { });
+        if (window._pendingFullscreen) {
+            window._pendingFullscreen = false;
+            if (video.requestFullscreen) video.requestFullscreen().catch(()=>{});
+        }
+    }, { once: true });
+
+    let saveInterval = null;
+    video._resumeChecked = false;
+
+    const checkResumeFallback = () => {
+        if (requestId && requestId !== renderCount) return;
+        if (video._resumeChecked) return;
+        const saved = getSavedTime();
+        if (!saved || saved <= 0) {
+            video._resumeChecked = true;
+            return;
+        }
+        video._resumeChecked = true;
+        const currentTime = video.currentTime || 0;
+        if (saved > 30 && (currentTime < 60 || Math.abs(currentTime - saved) > 60)) {
+            showResumeToast(saved, () => {
+                const jump = () => { video.currentTime = saved; video.play(); };
+                if (video.readyState >= 1) jump();
+                else video.addEventListener('loadedmetadata', jump, { once: true });
+            }, () => { video.play(); });
+        }
+    };
+    video.addEventListener('loadedmetadata', checkResumeFallback);
+    video.addEventListener('canplay', checkResumeFallback);
+    checkResumeFallback();
+
+    const doSaveFallback = () => {
+        if (requestId && requestId !== renderCount) return;
+        if (video.duration > 0) saveProgress(video.currentTime, video.duration);
+    };
+
+    video.addEventListener('play', () => {
+        if (requestId && requestId !== renderCount) return;
+        if (!saveInterval) saveInterval = setInterval(doSaveFallback, 3000);
+    });
+    video.addEventListener('pause', doSaveFallback);
+    video.addEventListener('seeked', doSaveFallback);
+    video.addEventListener('timeupdate', () => {
+        if (requestId && requestId !== renderCount) return;
+        if (!video._lastSave || Date.now() - video._lastSave > 5000) {
+            video._lastSave = Date.now();
+            doSaveFallback();
+        }
+    });
+    video.addEventListener('ended', () => {
+        if (requestId && requestId !== renderCount) return;
+        clearInterval(saveInterval);
+        const key = resumeKey();
+        if (key) localStorage.removeItem(key);
+        handleAutoplayNext();
+    });
+
+    // Fallback de timeout para ocultar loader
+    setTimeout(() => { if (hideLoader) hideLoader(); if (mainLoader) mainLoader.hide(); }, 10000);
 }
 
 function renderPlayer(animate = false) {
@@ -1676,13 +1758,14 @@ if (castBtn) {
 
 // ── Inicialización ────────────────────────────────────────
 if (SERIE.type === 'movie') {
-    // Es una película: ocultar inmediatamente la lista y abrir directamente
+    // Es una película: ocultar inmediatamente la lista/temporadas, pero mantener el header
     const epList = $('episodes-list');
     const seasonsWrap = document.querySelector('.seasons-wrap');
-    const sHeader = $('serie-header');
+    const resetBtn = $('btn-serie-reset');
     if (epList) epList.style.display = 'none';
     if (seasonsWrap) seasonsWrap.style.display = 'none';
-    if (sHeader) sHeader.style.display = 'none';
+    // Ocultar botón de reset (no aplica a películas)
+    if (resetBtn) resetBtn.style.display = 'none';
 
     const firstS = SERIE.seasons[0];
     if (firstS && firstS.episodes.length > 0) {

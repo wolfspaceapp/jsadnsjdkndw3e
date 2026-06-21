@@ -284,6 +284,7 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
         clearInterval(window._autoplayTimer);
         window._autoplayTimer = null;
     }
+    document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
     const nb = document.getElementById('btn-next');
     if (nb) {
         nb.classList.remove('autoplay-loading');
@@ -387,7 +388,7 @@ function closePlayer() {
     }
 
     $('player-section').style.display = 'none';
-    $('episodes-list').style.display = 'flex';
+    $('episodes-list').style.display = '';
     document.querySelector('.seasons-wrap').style.display = 'block';
     const sHeader = $('serie-header');
     if (sHeader) sHeader.style.display = 'flex';
@@ -407,6 +408,7 @@ function closePlayer() {
         clearInterval(window._autoplayTimer);
         window._autoplayTimer = null;
     }
+    document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
     const nb2 = document.getElementById('btn-next');
     if (nb2) {
         nb2.classList.remove('autoplay-loading');
@@ -861,40 +863,47 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
 }
 
 function handleAutoplayNext() {
-    if (SERIE.type === 'movie') return;
     if (localStorage.getItem('autoplay_enabled') !== '1') return;
-
-    const eps = SERIE.seasons[activeSeason].episodes;
-    const currentIdx = eps.findIndex(e => String(e.num) === String(currentEpisode.num));
+    
     let nextEp = null;
     let nextSeasonIdx = activeSeason;
 
-    if (currentIdx >= 0 && currentIdx < eps.length - 1) {
-        nextEp = eps[currentIdx + 1];
-    } else if (activeSeason < SERIE.seasons.length - 1) {
-        let sIdx = activeSeason + 1;
-        while (sIdx < SERIE.seasons.length) {
-            const nextSeason = SERIE.seasons[sIdx];
-            if (nextSeason && nextSeason.episodes && nextSeason.episodes.length > 0) {
-                nextEp = nextSeason.episodes[0];
-                nextSeasonIdx = sIdx;
-                break;
+    if (SERIE.type !== 'movie') {
+        const eps = SERIE.seasons[activeSeason].episodes;
+        const currentIdx = eps.findIndex(e => String(e.num) === String(currentEpisode.num));
+
+        if (currentIdx >= 0 && currentIdx < eps.length - 1) {
+            nextEp = eps[currentIdx + 1];
+        } else if (activeSeason < SERIE.seasons.length - 1) {
+            let sIdx = activeSeason + 1;
+            while (sIdx < SERIE.seasons.length) {
+                const nextSeason = SERIE.seasons[sIdx];
+                if (nextSeason && nextSeason.episodes && nextSeason.episodes.length > 0) {
+                    nextEp = nextSeason.episodes[0];
+                    nextSeasonIdx = sIdx;
+                    break;
+                }
+                sIdx++;
             }
-            sIdx++;
         }
     }
 
+    const playerWrap = document.getElementById('player-wrap');
+    if (!playerWrap) return;
+    const isFullscreenStart = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    const activeFsElement = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
+
     if (nextEp) {
         const nextBtn = document.getElementById('btn-next');
-        const isFullscreen = !!document.fullscreenElement;
         
         let fsOverlay = null;
-        if (isFullscreen) {
+        if (isFullscreenStart && playerWrap) {
             window._pendingFullscreen = true;
+            document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
             fsOverlay = document.createElement('div');
             fsOverlay.className = 'autoplay-fs-overlay';
             const epImg = nextEp.thumb || nextEp.img || SERIE.poster || SERIE.image || '';
-            const epImgHtml = epImg ? `<div style="width:240px; height:135px; border-radius:12px; overflow:hidden; margin-bottom:10px; box-shadow:0 10px 30px rgba(0,0,0,0.6); background:#111; position:relative; z-index:2;"><img src="${epImg}" style="width:100%; height:100%; object-fit:cover;"></div>` : '';
+            const epImgHtml = epImg ? `<div class="fs-ep-img" style="border-radius:12px; overflow:hidden; margin-bottom:10px; box-shadow:0 10px 30px rgba(0,0,0,0.6); background:#111; position:relative; z-index:2;"><img src="${epImg}" style="width:100%; height:100%; object-fit:cover;"></div>` : '';
             fsOverlay.style.background = 'transparent'; // Evitar fondo negro que tape todo
             const bgHtml = epImg ? `<div style="position:absolute; inset:-10%; background-image:url('${epImg}'); background-size:cover; background-position:center; filter:blur(12px); opacity:0.6; z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:radial-gradient(circle, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.8) 100%); z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:#000; z-index:0; opacity:0.85; pointer-events:none;"></div>` : '<div style="position:absolute; inset:0; background:#000; z-index:0; pointer-events:none;"></div>';
             
@@ -905,15 +914,15 @@ function handleAutoplayNext() {
                 ${bgHtml}
                 <div class="autoplay-fs-content" style="position:relative; z-index:2;">
                     ${epImgHtml}
-                    <div style="font-size:13px; color:var(--accent); font-weight:800; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">A continuación</div>
-                    <div style="font-size:26px; font-weight:800; color:#fff; line-height:1.2; margin-bottom:6px; max-width:600px;">${SERIE.title || ''}</div>
-                    <div style="font-size:16px; color:#aaa; margin-bottom:24px; max-width:500px;">Episodio ${nextEp.num}${seasonLabel}${nextEp.title ? ` - ${nextEp.title}` : ''}</div>
+                    <div class="fs-next-label" style="font-size:13px; color:var(--accent); font-weight:800; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">A continuación</div>
+                    <div class="fs-title" style="font-size:26px; font-weight:800; color:#fff; line-height:1.2; margin-bottom:6px; max-width:600px;">${SERIE.title || ''}</div>
+                    <div class="fs-subtitle" style="font-size:16px; color:#aaa; margin-bottom:24px; max-width:500px;">Episodio ${nextEp.num}${seasonLabel}${nextEp.title ? ` - ${nextEp.title}` : ''}</div>
                     <div class="fs-text" style="margin-bottom:16px;">Iniciando en <span id="fs-countdown">5</span></div>
                     <button id="fs-cancel-btn">Cancelar</button>
                 </div>
             `;
-            const fsContainer = document.fullscreenElement;
-            if (fsContainer) fsContainer.appendChild(fsOverlay);
+            const activeFsElement = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
+            activeFsElement.appendChild(fsOverlay);
 
             // Actualizar la interfaz de la serie inmediatamente (sin recargar el reproductor)
             currentEpisode = nextEp;
@@ -952,8 +961,9 @@ function handleAutoplayNext() {
                     nextBtn.classList.remove('autoplay-loading');
                     if (span) span.textContent = originalText;
                 }
-                if (isFullscreen) {
-                    // Cambiar el src del video sin destruir el DOM → no sale de fullscreen
+                const isFsNow = !!(document.fullscreenElement || document.webkitFullscreenElement);
+                if (isFullscreenStart) {
+                    // Si iniciamos en fullscreen (o todavía lo estamos), intercambiar sin destruir el DOM
                     swapVideoInFullscreen(nextEp, nextSeasonIdx);
                 } else {
                     playEpisode(nextSeasonIdx, nextEp.num, true, true);
@@ -975,6 +985,49 @@ function handleAutoplayNext() {
                     updateInterfaceForEpisode(activeSeason, eps[currentIdx]);
                 };
             }
+    } else {
+        // Pantalla de finalización (película o fin de serie)
+        document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
+        const fsOverlay = document.createElement('div');
+        fsOverlay.className = 'autoplay-fs-overlay';
+        
+        const img = currentEpisode.thumb || currentEpisode.img || SERIE.poster || SERIE.image || '';
+        const bgHtml = img ? `<div style="position:absolute; inset:-10%; background-image:url('${img}'); background-size:cover; background-position:center; filter:blur(12px); opacity:0.5; z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:radial-gradient(circle, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 100%); z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:#000; z-index:0; opacity:0.85; pointer-events:none;"></div>` : '<div style="position:absolute; inset:0; background:#000; z-index:0; pointer-events:none;"></div>';
+        const label = SERIE.type === 'movie' ? 'Película finalizada' : 'Serie finalizada';
+        
+        fsOverlay.innerHTML = `
+            ${bgHtml}
+            <div style="position:relative; z-index:2; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; height:100%; padding:20px; box-sizing:border-box;">
+                <div class="fs-ep-img" style="border-radius:12px; overflow:hidden; margin-bottom:20px; box-shadow:0 10px 30px rgba(0,0,0,0.6); background:#111; position:relative; z-index:2;">
+                    <img src="${img}" style="width:100%; height:100%; object-fit:cover;">
+                    <div style="position:absolute; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <div style="font-size:14px; color:var(--accent); font-weight:800; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:8px;">${label}</div>
+                <div style="font-size:28px; font-weight:900; color:#fff; line-height:1.2; margin-bottom:12px; max-width:600px;">${SERIE.title || ''}</div>
+                <div style="font-size:15px; color:#aaa; margin-bottom:24px; max-width:500px;">¡Esperamos que la hayas disfrutado!</div>
+                <button id="fs-close-final-btn" style="background:var(--accent); color:#000; border:none; padding:12px 32px; border-radius:24px; font-size:15px; font-weight:800; cursor:pointer; transition:transform 0.2s;">Cerrar reproductor</button>
+            </div>
+        `;
+        activeFsElement.appendChild(fsOverlay);
+        
+        const closeBtn = fsOverlay.querySelector('#fs-close-final-btn');
+        if (closeBtn) {
+            closeBtn.onmouseenter = () => closeBtn.style.transform = 'scale(1.05)';
+            closeBtn.onmouseleave = () => closeBtn.style.transform = 'scale(1)';
+            closeBtn.onclick = (e) => {
+                e.stopPropagation();
+                fsOverlay.remove();
+                if (document.fullscreenElement || document.webkitFullscreenElement) {
+                    if (document.exitFullscreen) document.exitFullscreen();
+                    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                }
+                closePlayer();
+            };
+        }
     }
 }
 
@@ -982,6 +1035,7 @@ function handleAutoplayNext() {
 
 // ── Intercambio de video en fullscreen (sin reconstruir DOM) ─────
 function swapVideoInFullscreen(nextEp, nextSeasonIdx) {
+    document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
     // Buscar el <video> existente antes de cualquier cambio
     const playerWrap = document.getElementById('player-wrap');
     const existingVideo = playerWrap ? playerWrap.querySelector('video') : null;
@@ -1004,7 +1058,7 @@ function swapVideoInFullscreen(nextEp, nextSeasonIdx) {
     if (newPoster) existingVideo.setAttribute('poster', newPoster);
 
     // Mostrar loading encima del video mientras carga (sin destruir nada)
-    const fsContainer = document.fullscreenElement || playerWrap;
+    const fsContainer = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
     let swapLoader = document.getElementById('swap-loader-overlay');
     if (!swapLoader) {
         swapLoader = document.createElement('div');

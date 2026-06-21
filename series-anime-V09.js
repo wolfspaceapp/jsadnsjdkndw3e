@@ -241,6 +241,8 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
         return;
     }
 
+    const isCurrentMovie = SERIE.type === 'movie' || currentEpisode.type === 'movie';
+
     // Marcar como visto (Siempre activo por defecto)
     setWatched(seasonIdx, epNum, true);
     const input = document.querySelector(`.ep-switch[data-s="${seasonIdx}"][data-e="${epNum}"] input`);
@@ -310,7 +312,7 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
     if (closeBtn) {
         closeBtn.style.display = '';
         closeBtn.setAttribute('aria-label',
-            SERIE.type === 'movie' ? 'Volver al catálogo' : 'Volver a episodios'
+            isCurrentMovie ? 'Volver al catálogo' : 'Volver a episodios'
         );
         // El listener global ya llama a closePlayer(), que para películas redirige a backUrl
     }
@@ -319,13 +321,13 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
     const playerEpTitle = $('player-ep-title');
     if (playerEpTitle) {
         playerEpTitle.style.display = '';
-        playerEpTitle.textContent = SERIE.type === 'movie'
+        playerEpTitle.textContent = isCurrentMovie
             ? (currentEpisode.title || SERIE.title)
             : `Ep. ${epNum} · ${currentEpisode.title}`;
     }
 
     // Ocultar botón de reset (no aplica a películas)
-    if (SERIE.type === 'movie') {
+    if (isCurrentMovie) {
         const resetBtn = $('btn-serie-reset');
         if (resetBtn) resetBtn.style.display = 'none';
     }
@@ -369,10 +371,7 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
         }
     }
 
-    // Configurar botones
-    const isMovie = SERIE.type === 'movie' || currentEpisode.type === 'movie';
-
-    if (isMovie) {
+    if (isCurrentMovie) {
         if (prevBtn) prevBtn.style.display = 'none';
         if (nextBtn) nextBtn.style.display = 'none';
         // Ocultar el footer completo en películas
@@ -405,7 +404,9 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
 }
 
 function closePlayer() {
-    if (SERIE.type === 'movie') {
+    const isCurrentMovie = SERIE.type === 'movie' || (currentEpisode && currentEpisode.type === 'movie');
+    
+    if (isCurrentMovie) {
         window.location.href = SERIE.backUrl || 'go:home';
         return;
     }
@@ -823,11 +824,12 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
     try {
         // Actualiza toda la UI sin tocar el reproductor de video
         activeSeason = seasonIdx;
+        const isCurrentMovie = SERIE.type === 'movie' || (ep && ep.type === 'movie');
 
         // Título del episodio en el header del player
         const playerTitle = document.getElementById('player-ep-title');
         if (playerTitle) {
-            playerTitle.textContent = SERIE.type === 'movie' 
+            playerTitle.textContent = isCurrentMovie 
                 ? (ep.title || SERIE.title)
                 : `Ep. ${ep.num} · ${ep.title || ''}`;
         }
@@ -888,8 +890,10 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
 }
 
 function handleAutoplayNext() {
+    const isCurrentMovie = SERIE.type === 'movie' || (currentEpisode && currentEpisode.type === 'movie');
+
     // Si es película, siempre mostrar pantalla de finalizado sin importar autoplay
-    if (SERIE.type === 'movie') {
+    if (isCurrentMovie) {
         const playerWrap = document.getElementById('player-wrap');
         const activeFsElement = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
         document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
@@ -1059,7 +1063,7 @@ function handleAutoplayNext() {
         
         const img = currentEpisode.thumb || currentEpisode.img || SERIE.poster || SERIE.image || '';
         const bgHtml = img ? `<div style="position:absolute; inset:-10%; background-image:url('${img}'); background-size:cover; background-position:center; filter:blur(12px); opacity:0.5; z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:radial-gradient(circle, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 100%); z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:#000; z-index:0; opacity:0.85; pointer-events:none;"></div>` : '<div style="position:absolute; inset:0; background:#000; z-index:0; pointer-events:none;"></div>';
-        const label = SERIE.type === 'movie' ? 'Película finalizada' : 'Serie finalizada';
+        const label = isCurrentMovie ? 'Película finalizada' : 'Serie finalizada';
         
         fsOverlay.innerHTML = `
             ${bgHtml}
@@ -1739,7 +1743,9 @@ if (castBtn) {
 }
 
 // ── Inicialización ────────────────────────────────────────
-if (SERIE.type === 'movie') {
+const isInitMovie = SERIE.type === 'movie' || (SERIE.seasons?.[0]?.episodes?.[0]?.type === 'movie');
+
+if (isInitMovie) {
     // Es una película: ocultar inmediatamente la interfaz de la serie de forma síncrona
     $('player-section').style.display = 'flex';
 

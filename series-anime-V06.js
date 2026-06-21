@@ -298,47 +298,33 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
     document.querySelector('.seasons-wrap').style.display = 'none';
     const sHeader = $('serie-header');
     const playerHeader = document.getElementById('player-header');
-    if (SERIE.type === 'movie') {
-        // Para películas: el header principal (con botón volver al catálogo) permanece visible
-        // Ocultar botón de reset que no aplica
-        if (sHeader) sHeader.style.display = 'flex';
-        if (playerHeader) {
-            // Mostrar el player-header pero sin el botón cerrar (el header principal lo reemplaza)
-            playerHeader.style.display = '';
-        }
-        const resetBtn = $('btn-serie-reset');
-        if (resetBtn) resetBtn.style.display = 'none';
-    } else {
-        // Para series: ocultar header principal, mostrar el del player
-        if (sHeader) sHeader.style.display = 'none';
-        if (playerHeader) playerHeader.style.display = '';
-    }
+    // Siempre ocultar el serie-header y mostrar el player-header
+    if (sHeader) sHeader.style.display = 'none';
+    if (playerHeader) playerHeader.style.display = '';
 
-    // Ajustar botón cerrar player
+    // Botón cerrar del player: siempre visible
     const closeBtn = $('btn-close-player');
     if (closeBtn) {
-        if (SERIE.type === 'movie') {
-            // Para películas: el botón de volver está en el serie-header, ocultar este
-            closeBtn.style.display = 'none';
-        } else {
-            closeBtn.style.display = '';
-            closeBtn.setAttribute('aria-label', 'Volver a episodios');
-        }
+        closeBtn.style.display = '';
+        closeBtn.setAttribute('aria-label',
+            SERIE.type === 'movie' ? 'Volver al catálogo' : 'Volver a episodios'
+        );
+        // El listener global ya llama a closePlayer(), que para películas redirige a backUrl
     }
 
-    // Ocultar también el player-ep-title en películas (ya se muestra en el serie-header)
+    // Título del episodio: en películas solo el nombre, en series "Ep. X · Título"
     const playerEpTitle = $('player-ep-title');
     if (playerEpTitle) {
-        playerEpTitle.style.display = SERIE.type === 'movie' ? 'none' : '';
+        playerEpTitle.style.display = '';
+        playerEpTitle.textContent = SERIE.type === 'movie'
+            ? (currentEpisode.title || SERIE.title)
+            : `Ep. ${epNum} · ${currentEpisode.title}`;
     }
 
-    // Actualizar título
+    // Ocultar botón de reset (no aplica a películas)
     if (SERIE.type === 'movie') {
-        // En películas el título va en el serie-header (player-ep-title está oculto)
-        const headerTitle = $('header-title');
-        if (headerTitle) headerTitle.textContent = SERIE.title;
-    } else {
-        $('player-ep-title').textContent = `Ep. ${epNum} · ${currentEpisode.title}`;
+        const resetBtn = $('btn-serie-reset');
+        if (resetBtn) resetBtn.style.display = 'none';
     }
 
     // Configurar botones de navegación con lógica de temporadas

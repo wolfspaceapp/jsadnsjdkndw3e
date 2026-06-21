@@ -719,6 +719,105 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 20px;
+  padding: 20px;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.fs-ep-img {
+  width: 240px;
+  height: 135px;
+}
+
+@media (max-height: 600px) and (orientation: landscape) {
+  .autoplay-fs-content {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto auto auto auto;
+    column-gap: 24px;
+    row-gap: 4px;
+    align-items: center;
+    text-align: left;
+    max-width: 700px;
+    padding: 20px;
+  }
+  
+  .fs-ep-img {
+    grid-row: 1 / span 5;
+    width: 220px;
+    height: 124px;
+    margin-bottom: 0 !important;
+  }
+
+  .fs-next-label, .autoplay-fs-content .fs-title, .autoplay-fs-content .fs-subtitle, .fs-text, #fs-cancel-btn {
+    grid-column: 2;
+    margin-bottom: 0 !important;
+    text-align: left;
+  }
+  
+  .autoplay-fs-content .fs-title {
+    font-size: 20px !important;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .autoplay-fs-content .fs-subtitle {
+    font-size: 14px !important;
+    margin-bottom: 8px !important;
+  }
+  
+  .fs-text {
+    font-size: 18px !important;
+  }
+  
+  .fs-text span {
+    font-size: 24px !important;
+  }
+  
+  #fs-cancel-btn {
+    justify-self: start;
+    padding: 8px 20px;
+    font-size: 14px;
+    margin-top: 5px;
+  }
+}
+
+@media (max-height: 600px) and (orientation: portrait), (max-width: 600px) and (orientation: portrait) {
+  .autoplay-fs-content {
+    gap: 8px;
+    padding: 10px;
+  }
+  .fs-ep-img {
+    width: 160px;
+    height: 90px;
+    margin-bottom: 5px;
+  }
+  .autoplay-fs-content .fs-title {
+    font-size: 20px !important;
+    margin-bottom: 2px !important;
+  }
+  .autoplay-fs-content .fs-subtitle {
+    font-size: 14px !important;
+    margin-bottom: 12px !important;
+  }
+  .fs-next-label {
+    margin-bottom: 2px !important;
+  }
+  .fs-text {
+    font-size: 18px !important;
+    margin-bottom: 10px !important;
+  }
+  .fs-text span {
+    font-size: 24px !important;
+  }
+  #fs-cancel-btn {
+    padding: 8px 20px;
+    font-size: 14px;
+  }
 }
 
 .fs-text {

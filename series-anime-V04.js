@@ -863,12 +863,61 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
 }
 
 function handleAutoplayNext() {
+    // Si es película, siempre mostrar pantalla de finalizado sin importar autoplay
+    if (SERIE.type === 'movie') {
+        const playerWrap = document.getElementById('player-wrap');
+        const activeFsElement = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
+        document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
+        const fsOverlay = document.createElement('div');
+        fsOverlay.className = 'autoplay-fs-overlay';
+
+        const img = currentEpisode.thumb || currentEpisode.img || SERIE.poster || SERIE.image || '';
+        const bgHtml = img
+            ? `<div style="position:absolute;inset:-10%;background-image:url('${img}');background-size:cover;background-position:center;filter:blur(12px);opacity:0.5;z-index:1;pointer-events:none;"></div><div style="position:absolute;inset:0;background:radial-gradient(circle,rgba(0,0,0,0.3) 0%,rgba(0,0,0,0.9) 100%);z-index:1;pointer-events:none;"></div><div style="position:absolute;inset:0;background:#000;z-index:0;opacity:0.85;pointer-events:none;"></div>`
+            : '<div style="position:absolute;inset:0;background:#000;z-index:0;pointer-events:none;"></div>';
+
+        fsOverlay.innerHTML = `
+            ${bgHtml}
+            <div style="position:relative;z-index:2;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;padding:20px;box-sizing:border-box;">
+                <div class="fs-ep-img" style="border-radius:12px;overflow:hidden;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,0.6);background:#111;position:relative;z-index:2;">
+                    ${img ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover;">` : ''}
+                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <div style="font-size:14px;color:var(--accent);font-weight:800;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Finalizado Película</div>
+                <div style="font-size:28px;font-weight:900;color:#fff;line-height:1.2;margin-bottom:12px;max-width:600px;">${SERIE.title || ''}</div>
+                <div style="font-size:15px;color:#aaa;margin-bottom:24px;max-width:500px;">¡Esperamos que la hayas disfrutado!</div>
+                <button id="fs-back-movie-btn" style="background:var(--accent);color:#000;border:none;padding:12px 32px;border-radius:24px;font-size:15px;font-weight:800;cursor:pointer;transition:transform 0.2s;">Volver</button>
+            </div>
+        `;
+        if (activeFsElement) activeFsElement.appendChild(fsOverlay);
+
+        const backBtn = fsOverlay.querySelector('#fs-back-movie-btn');
+        if (backBtn) {
+            backBtn.onmouseenter = () => backBtn.style.transform = 'scale(1.05)';
+            backBtn.onmouseleave = () => backBtn.style.transform = 'scale(1)';
+            backBtn.onclick = (e) => {
+                e.stopPropagation();
+                fsOverlay.remove();
+                if (document.fullscreenElement || document.webkitFullscreenElement) {
+                    if (document.exitFullscreen) document.exitFullscreen();
+                    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                }
+                closePlayer();
+            };
+        }
+        return;
+    }
+
     if (localStorage.getItem('autoplay_enabled') !== '1') return;
     
     let nextEp = null;
     let nextSeasonIdx = activeSeason;
 
-    if (SERIE.type !== 'movie') {
+    {
         const eps = SERIE.seasons[activeSeason].episodes;
         const currentIdx = eps.findIndex(e => String(e.num) === String(currentEpisode.num));
 
@@ -990,7 +1039,7 @@ function handleAutoplayNext() {
         
         const img = currentEpisode.thumb || currentEpisode.img || SERIE.poster || SERIE.image || '';
         const bgHtml = img ? `<div style="position:absolute; inset:-10%; background-image:url('${img}'); background-size:cover; background-position:center; filter:blur(12px); opacity:0.5; z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:radial-gradient(circle, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 100%); z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:#000; z-index:0; opacity:0.85; pointer-events:none;"></div>` : '<div style="position:absolute; inset:0; background:#000; z-index:0; pointer-events:none;"></div>';
-        const label = SERIE.type === 'movie' ? 'Película finalizada' : 'Serie finalizada';
+        const label = 'Serie finalizada';
         
         fsOverlay.innerHTML = `
             ${bgHtml}
@@ -1627,7 +1676,14 @@ if (castBtn) {
 
 // ── Inicialización ────────────────────────────────────────
 if (SERIE.type === 'movie') {
-    // Es una película: no renderizar menús y abrir directamente
+    // Es una película: ocultar inmediatamente la lista y abrir directamente
+    const epList = $('episodes-list');
+    const seasonsWrap = document.querySelector('.seasons-wrap');
+    const sHeader = $('serie-header');
+    if (epList) epList.style.display = 'none';
+    if (seasonsWrap) seasonsWrap.style.display = 'none';
+    if (sHeader) sHeader.style.display = 'none';
+
     const firstS = SERIE.seasons[0];
     if (firstS && firstS.episodes.length > 0) {
         // Un pequeño delay para asegurar que el DOM esté listo

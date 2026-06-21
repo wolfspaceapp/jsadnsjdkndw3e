@@ -924,9 +924,8 @@ function handleAutoplayNext() {
             const activeFsElement = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
             activeFsElement.appendChild(fsOverlay);
 
-            // Actualizar la interfaz de la serie inmediatamente (sin recargar el reproductor)
-            currentEpisode = nextEp;
-            updateInterfaceForEpisode(nextSeasonIdx, nextEp);
+            // NO actualizar la interfaz hasta que el usuario confirme o expire el countdown
+            // currentEpisode y updateInterfaceForEpisode se llamarán en swapVideoInFullscreen
         } else {
             window._pendingFullscreen = false;
         }
@@ -980,9 +979,7 @@ function handleAutoplayNext() {
                     if (nextBtn) nextBtn.classList.remove('autoplay-loading');
                     if (span) span.textContent = originalText;
                     window._pendingFullscreen = false;
-                    // Revertir la interfaz al episodio anterior
-                    currentEpisode = eps[currentIdx];
-                    updateInterfaceForEpisode(activeSeason, eps[currentIdx]);
+                    // Ya no es necesario revertir la interfaz porque nunca la actualizamos
                 };
             }
     } else {

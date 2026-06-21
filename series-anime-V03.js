@@ -1033,6 +1033,11 @@ function handleAutoplayNext() {
 // ── Intercambio de video en fullscreen (sin reconstruir DOM) ─────
 function swapVideoInFullscreen(nextEp, nextSeasonIdx) {
     document.querySelectorAll('.autoplay-fs-overlay').forEach(el => el.remove());
+    
+    // ACTUALIZAR LA INTERFAZ AQUÍ (cuando ya se confirmó el cambio)
+    currentEpisode = nextEp;
+    updateInterfaceForEpisode(nextSeasonIdx, nextEp);
+    
     // Buscar el <video> existente antes de cualquier cambio
     const playerWrap = document.getElementById('player-wrap');
     const existingVideo = playerWrap ? playerWrap.querySelector('video') : null;

@@ -294,8 +294,11 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
 
     // Mostrar reproductor y ocultar interfaz de serie
     $('player-section').style.display = 'flex';
-    $('episodes-list').style.display = 'none';
-    document.querySelector('.seasons-wrap').style.display = 'none';
+    const epListEl = $('episodes-list');
+    const seasonsWrapEl = document.querySelector('.seasons-wrap');
+    if (epListEl) epListEl.style.display = 'none';
+    if (seasonsWrapEl) seasonsWrapEl.style.display = 'none';
+    
     const sHeader = $('serie-header');
     const playerHeader = document.getElementById('player-header');
     // Siempre ocultar el serie-header y mostrar el player-header
@@ -389,11 +392,11 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
         }
     }
 
-    prevBtn.onclick = () => {
+    if (prevBtn) prevBtn.onclick = () => {
         if (prevEp) playEpisode(prevSeasonIdx, prevEp.num, true);
     };
 
-    nextBtn.onclick = () => {
+    if (nextBtn) nextBtn.onclick = () => {
         if (nextEp) playEpisode(nextSeasonIdx, nextEp.num, true);
     };
 
@@ -403,7 +406,7 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
 
 function closePlayer() {
     if (SERIE.type === 'movie') {
-        location.href = SERIE.backUrl || 'home.html';
+        window.location.href = SERIE.backUrl || 'go:home';
         return;
     }
 
@@ -824,7 +827,9 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
         // Título del episodio en el header del player
         const playerTitle = document.getElementById('player-ep-title');
         if (playerTitle) {
-            playerTitle.textContent = `Ep. ${ep.num} · ${ep.title || ''}`;
+            playerTitle.textContent = SERIE.type === 'movie' 
+                ? (ep.title || SERIE.title)
+                : `Ep. ${ep.num} · ${ep.title || ''}`;
         }
 
         // Marcar como visto
@@ -907,7 +912,7 @@ function handleAutoplayNext() {
                         </svg>
                     </div>
                 </div>
-                <div style="font-size:14px;color:var(--accent);font-weight:800;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Finalizado Película</div>
+                <div style="font-size:14px;color:var(--accent);font-weight:800;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Película Finalizada</div>
                 <div style="font-size:28px;font-weight:900;color:#fff;line-height:1.2;margin-bottom:12px;max-width:600px;">${SERIE.title || ''}</div>
                 <div style="font-size:15px;color:#aaa;margin-bottom:24px;max-width:500px;">¡Esperamos que la hayas disfrutado!</div>
                 <button id="fs-back-movie-btn" style="background:var(--accent);color:#000;border:none;padding:12px 32px;border-radius:24px;font-size:15px;font-weight:800;cursor:pointer;transition:transform 0.2s;">Volver</button>
@@ -993,8 +998,6 @@ function handleAutoplayNext() {
             const activeFsElement = document.fullscreenElement || document.webkitFullscreenElement || playerWrap;
             activeFsElement.appendChild(fsOverlay);
 
-            // NO actualizar la interfaz hasta que el usuario confirme o expire el countdown
-            // currentEpisode y updateInterfaceForEpisode se llamarán en swapVideoInFullscreen
         } else {
             window._pendingFullscreen = false;
         }
@@ -1029,9 +1032,7 @@ function handleAutoplayNext() {
                     nextBtn.classList.remove('autoplay-loading');
                     if (span) span.textContent = originalText;
                 }
-                const isFsNow = !!(document.fullscreenElement || document.webkitFullscreenElement);
                 if (isFullscreenStart) {
-                    // Si iniciamos en fullscreen (o todavía lo estamos), intercambiar sin destruir el DOM
                     swapVideoInFullscreen(nextEp, nextSeasonIdx);
                 } else {
                     playEpisode(nextSeasonIdx, nextEp.num, true, true);
@@ -1048,7 +1049,6 @@ function handleAutoplayNext() {
                     if (nextBtn) nextBtn.classList.remove('autoplay-loading');
                     if (span) span.textContent = originalText;
                     window._pendingFullscreen = false;
-                    // Ya no es necesario revertir la interfaz porque nunca la actualizamos
                 };
             }
     } else {
@@ -1059,7 +1059,7 @@ function handleAutoplayNext() {
         
         const img = currentEpisode.thumb || currentEpisode.img || SERIE.poster || SERIE.image || '';
         const bgHtml = img ? `<div style="position:absolute; inset:-10%; background-image:url('${img}'); background-size:cover; background-position:center; filter:blur(12px); opacity:0.5; z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:radial-gradient(circle, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 100%); z-index:1; pointer-events:none;"></div><div style="position:absolute; inset:0; background:#000; z-index:0; opacity:0.85; pointer-events:none;"></div>` : '<div style="position:absolute; inset:0; background:#000; z-index:0; pointer-events:none;"></div>';
-        const label = 'Serie finalizada';
+        const label = SERIE.type === 'movie' ? 'Película finalizada' : 'Serie finalizada';
         
         fsOverlay.innerHTML = `
             ${bgHtml}
@@ -1096,8 +1096,6 @@ function handleAutoplayNext() {
         }
     }
 }
-
-
 
 // ── Intercambio de video en fullscreen (sin reconstruir DOM) ─────
 function swapVideoInFullscreen(nextEp, nextSeasonIdx) {
@@ -1225,8 +1223,6 @@ function swapVideoInFullscreen(nextEp, nextSeasonIdx) {
         existingVideo.addEventListener('ended', onEnded);
     });
 }
-
-
 
 function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requestId) {
     if (requestId && requestId !== renderCount) return;
@@ -1744,19 +1740,25 @@ if (castBtn) {
 
 // ── Inicialización ────────────────────────────────────────
 if (SERIE.type === 'movie') {
-    // Es una película: ocultar inmediatamente la lista/temporadas, pero mantener el header
+    // Es una película: ocultar inmediatamente la interfaz de la serie de forma síncrona
+    $('player-section').style.display = 'flex';
+
     const epList = $('episodes-list');
     const seasonsWrap = document.querySelector('.seasons-wrap');
     const resetBtn = $('btn-serie-reset');
+    const sHeader = $('serie-header');
+    const pHeader = document.getElementById('player-header');
+    
     if (epList) epList.style.display = 'none';
     if (seasonsWrap) seasonsWrap.style.display = 'none';
-    // Ocultar botón de reset (no aplica a películas)
     if (resetBtn) resetBtn.style.display = 'none';
+    if (sHeader) sHeader.style.display = 'none';
+    if (pHeader) pHeader.style.display = '';
 
-    const firstS = SERIE.seasons[0];
-    if (firstS && firstS.episodes.length > 0) {
-        // Un pequeño delay para asegurar que el DOM esté listo
-        setTimeout(() => playEpisode(0, firstS.episodes[0].num), 100);
+    const firstS = SERIE.seasons && SERIE.seasons[0];
+    if (firstS && firstS.episodes && firstS.episodes.length > 0) {
+        // Arrancar la reproducción de inmediato, sin demoras ni parpadeos
+        playEpisode(0, firstS.episodes[0].num, false, false);
     }
 } else {
     // Es una serie: comportamiento normal

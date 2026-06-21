@@ -882,6 +882,10 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
         if (nextBtn) { 
             nextBtn.disabled = !nextEp2; 
             nextBtn.style.display = nextEp2 ? '' : 'none';
+            // IMPORTANTE: Aseguramos la limpieza del estado visual del botón de "Siguiente"
+            nextBtn.classList.remove('autoplay-loading');
+            const spNext = nextBtn.querySelector('span');
+            if (spNext) spNext.textContent = 'Siguiente';
             nextBtn.onclick = () => { if (nextEp2) playEpisode(nextSeasonIdx2, nextEp2.num, true); }; 
         }
     } catch (err) {
@@ -1008,20 +1012,20 @@ function handleAutoplayNext() {
 
         let countdown = 5;
         let span = null;
-        let originalText = 'Siguiente';
 
-        // Solo animar el botón si sigue visible (puede haber sido ocultado si es el último cap)
+        // Limpiar animaciones residuales de clicks anteriores de inmediato
         const nextBtnVisible = nextBtn && nextBtn.style.display !== 'none' && !nextBtn.disabled;
         if (nextBtnVisible) {
             nextBtn.classList.add('autoplay-loading');
             span = nextBtn.querySelector('span');
             if (span) {
-                originalText = span.textContent;
                 span.textContent = `Siguiente en ${countdown}...`;
             }
         }
 
-        if (window._autoplayTimer) clearInterval(window._autoplayTimer);
+        if (window._autoplayTimer) {
+            clearInterval(window._autoplayTimer);
+        }
         window._autoplayTimer = setInterval(() => {
             countdown--;
             if (countdown > 0) {
@@ -1032,10 +1036,14 @@ function handleAutoplayNext() {
                 clearInterval(window._autoplayTimer);
                 window._autoplayTimer = null;
                 if (fsOverlay) fsOverlay.remove();
-                if (nextBtnVisible) {
+                
+                // Forzar reset agresivo del botón al terminar contador
+                if (nextBtn) {
                     nextBtn.classList.remove('autoplay-loading');
-                    if (span) span.textContent = originalText;
+                    const spReset = nextBtn.querySelector('span');
+                    if (spReset) spReset.textContent = 'Siguiente';
                 }
+
                 if (isFullscreenStart) {
                     swapVideoInFullscreen(nextEp, nextSeasonIdx);
                 } else {
@@ -1050,8 +1058,12 @@ function handleAutoplayNext() {
                     clearInterval(window._autoplayTimer);
                     window._autoplayTimer = null;
                     fsOverlay.remove();
-                    if (nextBtn) nextBtn.classList.remove('autoplay-loading');
-                    if (span) span.textContent = originalText;
+                    // Limpiar agresivamente el botón si se cancela manualmente el pop-up
+                    if (nextBtn) {
+                        nextBtn.classList.remove('autoplay-loading');
+                        const spReset = nextBtn.querySelector('span');
+                        if (spReset) spReset.textContent = 'Siguiente';
+                    }
                     window._pendingFullscreen = false;
                 };
             }

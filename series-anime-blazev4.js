@@ -1271,27 +1271,50 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
                     const errCode = v.error ? v.error.code : 0;
                     
                     // Código 2 = MEDIA_ERR_NETWORK (incluye 403 de URLs expiradas)
+                    // Pero también ocurre al adelantar/retroceder el video (transitorio)
+                    // Esperamos 3 segundos antes de cambiar servidor para distinguirlos
                     if (errCode === 2) {
-                        console.warn(`⚠️ Error de red en video (código 2, posible 403). Intentando siguiente servidor...`);
+                        console.warn(`⚠️ Error de red en video (código 2). Esperando para verificar si es transitorio...`);
                         
-                        // Intentar siguiente servidor automáticamente
-                        const currentLang = currentEpisode && currentEpisode.langs && currentEpisode.langs[activeLang];
-                        if (currentLang && currentLang.servers && activeServer < currentLang.servers.length - 1) {
-                            activeServer++;
-                            updateLabels();
-                            wrap.innerHTML = '';
-                            renderPlayer();
-                        } else {
-                            // No hay más servidores, mostrar error
-                            hideLoader();
-                            wrap.innerHTML = `<div class="player-placeholder">
-                              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                              </svg>
-                              <p>Video no disponible</p>
-                              <small>El enlace ha expirado o el servidor no responde. Cambia de idioma o servidor.</small>
-                            </div>`;
+                        // Si el video ya tenía duración, probablemente es un seek transitorio
+                        if (v.duration > 0) {
+                            console.warn('⚠️ Video tenía duración, ignorando como error transitorio de seek.');
+                            return;
                         }
+
+                        // Si no tenía duración (nunca cargó), esperar 3s y si sigue fallando, cambiar servidor
+                        const errorTimer = setTimeout(() => {
+                            if (requestId && requestId !== renderCount) return;
+                            // Verificar que el video realmente sigue fallando (no se recuperó)
+                            if (v.networkState === v.NETWORK_NO_SOURCE || v.error) {
+                                console.warn('⚠️ Error de red confirmado tras espera. Intentando siguiente servidor...');
+                                const currentLang = currentEpisode && currentEpisode.langs && currentEpisode.langs[activeLang];
+                                if (currentLang && currentLang.servers && activeServer < currentLang.servers.length - 1) {
+                                    activeServer++;
+                                    updateLabels();
+                                    wrap.innerHTML = '';
+                                    renderPlayer();
+                                } else {
+                                    hideLoader();
+                                    wrap.innerHTML = `<div class="player-placeholder">
+                                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                                      </svg>
+                                      <p>Video no disponible</p>
+                                      <small>El enlace ha expirado o el servidor no responde. Cambia de idioma o servidor.</small>
+                                    </div>`;
+                                }
+                            }
+                        }, 3000);
+
+                        // Si el video se recupera antes de los 3s, cancelar el cambio
+                        v.addEventListener('playing', () => {
+                            clearTimeout(errorTimer);
+                        }, { once: true });
+                        v.addEventListener('canplay', () => {
+                            clearTimeout(errorTimer);
+                        }, { once: true });
+
                         return;
                     }
                     

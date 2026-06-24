@@ -803,6 +803,31 @@ function loadIframe(wrap, url, server, loader, requestId) {
     iframeWrap.appendChild(adBlocker);
     wrap.appendChild(iframeWrap);
 
+    // Activar cursor visible cuando hay iframe (Smart TV necesita puntero para interactuar)
+    document.body.classList.add('iframe-active');
+    document.body.classList.remove('tv-mode');
+
+    // Al salir del iframe (cerrar player), restaurar modo TV
+    const restoreTVMode = () => {
+        document.body.classList.remove('iframe-active');
+        document.body.classList.add('tv-mode');
+    };
+
+    // Observar si el wrap es vaciado (cambio de servidor o cierre del player)
+    const iframeObserver = new MutationObserver(() => {
+        if (!wrap.querySelector('iframe')) {
+            restoreTVMode();
+            iframeObserver.disconnect();
+        }
+    });
+    iframeObserver.observe(wrap, { childList: true, subtree: true });
+
+    // También restaurar al cerrar el player explícitamente
+    const closeBtn = document.getElementById('btn-close-player');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', restoreTVMode, { once: true });
+    }
+
     f.addEventListener('load', () => {
         loader.hide();
         window.open = origOpen;
@@ -1269,55 +1294,6 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
                     if (requestId && requestId !== renderCount) return;
                     
                     const errCode = v.error ? v.error.code : 0;
-                    
-                    // Código 2 = MEDIA_ERR_NETWORK (incluye 403 de URLs expiradas)
-                    // Pero también ocurre al adelantar/retroceder el video (transitorio)
-                    // Esperamos 3 segundos antes de cambiar servidor para distinguirlos
-                    if (errCode === 2) {
-                        console.warn(`⚠️ Error de red en video (código 2). Esperando para verificar si es transitorio...`);
-                        
-                        // Si el video ya tenía duración, probablemente es un seek transitorio
-                        if (v.duration > 0) {
-                            console.warn('⚠️ Video tenía duración, ignorando como error transitorio de seek.');
-                            return;
-                        }
-
-                        // Si no tenía duración (nunca cargó), esperar 3s y si sigue fallando, cambiar servidor
-                        const errorTimer = setTimeout(() => {
-                            if (requestId && requestId !== renderCount) return;
-                            // Verificar que el video realmente sigue fallando (no se recuperó)
-                            if (v.networkState === v.NETWORK_NO_SOURCE || v.error) {
-                                console.warn('⚠️ Error de red confirmado tras espera. Intentando siguiente servidor...');
-                                const currentLang = currentEpisode && currentEpisode.langs && currentEpisode.langs[activeLang];
-                                if (currentLang && currentLang.servers && activeServer < currentLang.servers.length - 1) {
-                                    activeServer++;
-                                    updateLabels();
-                                    wrap.innerHTML = '';
-                                    renderPlayer();
-                                } else {
-                                    hideLoader();
-                                    wrap.innerHTML = `<div class="player-placeholder">
-                                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                                      </svg>
-                                      <p>Video no disponible</p>
-                                      <small>El enlace ha expirado o el servidor no responde. Cambia de idioma o servidor.</small>
-                                    </div>`;
-                                }
-                            }
-                        }, 3000);
-
-                        // Si el video se recupera antes de los 3s, cancelar el cambio
-                        v.addEventListener('playing', () => {
-                            clearTimeout(errorTimer);
-                        }, { once: true });
-                        v.addEventListener('canplay', () => {
-                            clearTimeout(errorTimer);
-                        }, { once: true });
-
-                        return;
-                    }
-                    
                     if (errCode !== 4) {
                         console.warn(`⚠️ Ignorando error transitorio en video (código ${errCode}).`);
                         return;
@@ -1980,3 +1956,659 @@ document.addEventListener('webkitfullscreenchange', () => {
         window._pendingFullscreen = false;
     }
 });
+
+// ═══════════════════════════════════════════════════════════
+// SMART TV / REMOTE CONTROL NAVIGATION
+// Soporta: flechas ←↑→↓, Enter, Back/Escape, Play/Pause,
+//          teclas de color (rojo/verde/amarillo/azul),
+//          botones de volumen (sin efecto, solo visual)
+// ═══════════════════════════════════════════════════════════
+(function () {
+
+    // ── Detectar si es Smart TV ──────────────────────────
+    const isTV = /SmartTV|Tizen|WebOS|NetCast|SMART-TV|HbbTV|Opera TV|PlayStation|Xbox|AppleTV|Hisense|VIDAA|BRAVIA|Viera|SkyQ/i.test(navigator.userAgent);
+    // Activar siempre (TV o cualquier dispositivo con teclado/mando)
+    // Para forzar: cambiar a `true`
+    const TV_MODE = true;
+
+    if (!TV_MODE) return;
+
+    // ── Estilos de foco para TV ──────────────────────────
+    const style = document.createElement('style');
+    style.textContent = `
+        /* Ocultar cursor en modo TV */
+        body.tv-mode * { cursor: none !important; }
+
+        /* Restaurar cursor cuando hay iframe activo (para interactuar con el reproductor) */
+        body.iframe-active,
+        body.iframe-active * { cursor: default !important; }
+        body.iframe-active iframe { cursor: auto !important; }
+
+        /* Anillo de foco visible */
+        .tv-focus {
+            outline: 3px solid #FFAA00 !important;
+            outline-offset: 3px !important;
+            box-shadow: 0 0 0 6px rgba(255,170,0,0.25) !important;
+            transition: outline 0.1s, box-shadow 0.1s !important;
+            position: relative;
+            z-index: 10;
+        }
+
+        /* Escala en foco para cards */
+        .ep-card.tv-focus {
+            transform: scale(1.04) !important;
+            transition: transform 0.15s, outline 0.1s, box-shadow 0.1s !important;
+        }
+
+        /* Indicador OSD en esquina */
+        #tv-osd {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            background: rgba(0,0,0,0.75);
+            color: #FFAA00;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            letter-spacing: 0.5px;
+        }
+        #tv-osd.show { opacity: 1; }
+
+        /* Selector de servidor/idioma mejorado para TV */
+        .tv-picker-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 5000;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+        .tv-picker-box {
+            background: #1a1a1a;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 16px;
+            padding: 20px;
+            min-width: 260px;
+            max-width: 340px;
+        }
+        .tv-picker-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #737373;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+        .tv-picker-item {
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e5e5;
+            cursor: pointer;
+            transition: background 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .tv-picker-item.active {
+            background: rgba(255,170,0,0.15);
+            color: #FFAA00;
+        }
+        .tv-picker-item.tv-focus,
+        .tv-picker-item:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .tv-picker-item.active.tv-focus {
+            background: rgba(255,170,0,0.25);
+        }
+    `;
+    document.head.appendChild(style);
+    document.body.classList.add('tv-mode');
+
+    // ── OSD (On Screen Display) ──────────────────────────
+    const osd = document.createElement('div');
+    osd.id = 'tv-osd';
+    document.body.appendChild(osd);
+    let osdTimer = null;
+
+    function showOSD(text) {
+        osd.textContent = text;
+        osd.classList.add('show');
+        clearTimeout(osdTimer);
+        osdTimer = setTimeout(() => osd.classList.remove('show'), 1800);
+    }
+
+    // ── Estado de navegación ─────────────────────────────
+    let focusedEl = null;
+    let pickerOpen = false;
+
+    // ── Elementos focusables ─────────────────────────────
+    const FOCUSABLE = [
+        'button:not([disabled]):not([style*="display:none"])',
+        'a[href]',
+        '.ep-card',
+        '.season-tab',
+        '.tv-picker-item',
+        'select',
+        '[tabindex="0"]'
+    ].join(',');
+
+    function getFocusable(container) {
+        container = container || document.body;
+        return Array.from(container.querySelectorAll(FOCUSABLE)).filter(el => {
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden' && el.offsetParent !== null;
+        });
+    }
+
+    function setFocus(el) {
+        if (!el) return;
+        if (focusedEl) focusedEl.classList.remove('tv-focus');
+        focusedEl = el;
+        focusedEl.classList.add('tv-focus');
+        focusedEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    }
+
+    function initFocus() {
+        const els = getFocusable();
+        if (els.length > 0) setFocus(els[0]);
+    }
+
+    // ── Geometría para navegación espacial ───────────────
+    function getRect(el) {
+        const r = el.getBoundingClientRect();
+        return {
+            cx: r.left + r.width / 2,
+            cy: r.top + r.height / 2,
+            top: r.top, bottom: r.bottom,
+            left: r.left, right: r.right
+        };
+    }
+
+    function spatialNavigate(dir) {
+        if (!focusedEl) { initFocus(); return; }
+        const curr = getRect(focusedEl);
+        const els = getFocusable();
+        let best = null, bestScore = Infinity;
+
+        for (const el of els) {
+            if (el === focusedEl) continue;
+            const r = getRect(el);
+            let score = Infinity;
+
+            if (dir === 'right') {
+                if (r.cx <= curr.cx + 4) continue;
+                const dx = r.cx - curr.cx;
+                const dy = Math.abs(r.cy - curr.cy);
+                score = dx + dy * 2.5;
+            } else if (dir === 'left') {
+                if (r.cx >= curr.cx - 4) continue;
+                const dx = curr.cx - r.cx;
+                const dy = Math.abs(r.cy - curr.cy);
+                score = dx + dy * 2.5;
+            } else if (dir === 'down') {
+                if (r.cy <= curr.cy + 4) continue;
+                const dy = r.cy - curr.cy;
+                const dx = Math.abs(r.cx - curr.cx);
+                score = dy + dx * 2;
+            } else if (dir === 'up') {
+                if (r.cy >= curr.cy - 4) continue;
+                const dy = curr.cy - r.cy;
+                const dx = Math.abs(r.cx - curr.cx);
+                score = dy + dx * 2;
+            }
+
+            if (score < bestScore) { bestScore = score; best = el; }
+        }
+
+        if (best) setFocus(best);
+    }
+
+    // ── TV Picker (idioma/servidor) ───────────────────────
+    function openTVPicker(type) {
+        if (!currentEpisode) return;
+        pickerOpen = true;
+
+        const isLang = type === 'lang';
+        const items = isLang
+            ? currentEpisode.langs.map((l, i) => ({ label: l.name, idx: i }))
+            : (currentEpisode.langs[activeLang]?.servers || []).map((s, i) => ({ label: s.name, idx: i }));
+        const current = isLang ? activeLang : activeServer;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'tv-picker-overlay';
+
+        const box = document.createElement('div');
+        box.className = 'tv-picker-box';
+        box.innerHTML = `<div class="tv-picker-title">${isLang ? 'Seleccionar Idioma' : 'Seleccionar Servidor'}</div>`;
+
+        items.forEach(it => {
+            const div = document.createElement('div');
+            div.className = 'tv-picker-item' + (it.idx === current ? ' active' : '');
+            div.textContent = it.label;
+            div.dataset.idx = it.idx;
+            div.addEventListener('click', () => selectItem(it.idx));
+            box.appendChild(div);
+        });
+
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        // Focar el activo
+        const activeItem = box.querySelector('.tv-picker-item.active') || box.querySelector('.tv-picker-item');
+        if (activeItem) setFocus(activeItem);
+
+        function selectItem(idx) {
+            if (isLang) {
+                activeLang = idx;
+                activeServer = 0;
+                if (currentEpisode.langs[idx]) {
+                    localStorage.setItem('blaze_preferred_lang', currentEpisode.langs[idx].name);
+                }
+            } else {
+                activeServer = idx;
+            }
+            updateLabels();
+            renderPlayer();
+            closePicker();
+        }
+
+        function closePicker() {
+            overlay.remove();
+            pickerOpen = false;
+            // Restaurar foco al botón correspondiente
+            const btn = isLang ? $('btn-lang') : $('btn-srv');
+            if (btn) setFocus(btn);
+        }
+
+        overlay._closePicker = closePicker;
+        overlay._selectFocused = () => {
+            const f = box.querySelector('.tv-picker-item.tv-focus');
+            if (f) selectItem(+f.dataset.idx);
+        };
+
+        // Guardar referencia
+        document._tvPickerOverlay = overlay;
+    }
+
+    // ── Manejo del reproductor con mando ──────────────────
+    let seekDebounce = null;
+    const SEEK_STEP = 10; // segundos
+
+    function getActiveVideo() {
+        return document.querySelector('#player-wrap video') ||
+               document.querySelector('video');
+    }
+
+    function tvSeek(seconds) {
+        const v = getActiveVideo();
+        if (!v || !v.duration) return;
+        v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + seconds));
+        showOSD((seconds > 0 ? '▶▶ +' : '◀◀ ') + Math.abs(seconds) + 's');
+    }
+
+    function tvPlayPause() {
+        const v = getActiveVideo();
+        if (!v) return;
+        if (v.paused) { v.play(); showOSD('▶ Reproduciendo'); }
+        else { v.pause(); showOSD('⏸ Pausado'); }
+    }
+
+    function isPlayerOpen() {
+        const ps = $('player-section');
+        return ps && ps.style.display !== 'none';
+    }
+
+    // ── Keycodes de Smart TV ──────────────────────────────
+    // Tizen/WebOS/HbbTV usan códigos específicos
+    const KEY = {
+        UP:        [38, 'ArrowUp'],
+        DOWN:      [40, 'ArrowDown'],
+        LEFT:      [37, 'ArrowLeft'],
+        RIGHT:     [39, 'ArrowRight'],
+        ENTER:     [13, 'Enter'],
+        BACK:      [8, 27, 461, 10009, 'Backspace', 'Escape', 'GoBack'],   // Back / Escape
+        PLAY:      [415, 'MediaPlay'],
+        PAUSE:     [19, 'MediaPause'],
+        PLAY_PAUSE:[179, 'MediaPlayPause'],
+        STOP:      [413, 'MediaStop'],
+        FF:        [417, 'MediaFastForward'],
+        RW:        [412, 'MediaRewind'],
+        RED:       [403, 'ColorF0Red'],
+        GREEN:     [404, 'ColorF1Green'],
+        YELLOW:    [405, 'ColorF2Yellow'],
+        BLUE:      [406, 'ColorF3Blue'],
+    };
+
+    function matchKey(e, keyDef) {
+        return keyDef.includes(e.keyCode) || keyDef.includes(e.key);
+    }
+
+    // ── Listener principal ────────────────────────────────
+    document.addEventListener('keydown', function (e) {
+
+        // ── Picker abierto ────────────────────────────────
+        if (pickerOpen) {
+            const overlay = document._tvPickerOverlay;
+            if (matchKey(e, KEY.UP))    { spatialNavigate('up');   e.preventDefault(); return; }
+            if (matchKey(e, KEY.DOWN))  { spatialNavigate('down'); e.preventDefault(); return; }
+            if (matchKey(e, KEY.ENTER)) { overlay?._selectFocused(); e.preventDefault(); return; }
+            if (matchKey(e, KEY.BACK))  { overlay?._closePicker();   e.preventDefault(); return; }
+            e.preventDefault();
+            return;
+        }
+
+        // ── Reproductor activo ────────────────────────────
+        if (isPlayerOpen()) {
+
+            // Detectar si WolfPlayer está activo (video nativo, no iframe)
+            const hasWolfPlayer = !!document.querySelector('#playerContainer');
+            const hasIframe = !!document.querySelector('#player-frame');
+
+            // Si hay WolfPlayer activo, delegar flechas y enter a él
+            // Solo interceptamos teclas que WolfPlayer NO maneja
+            if (hasWolfPlayer && !hasIframe) {
+
+                // Flechas ↑↓ → volumen en WolfPlayer (ya lo maneja internamente)
+                // Flechas ←→ → seek en WolfPlayer (ya lo maneja internamente)
+                // Solo dejamos pasar sin preventDefault para que WolfPlayer las reciba
+                if (matchKey(e, KEY.LEFT) || matchKey(e, KEY.RIGHT) ||
+                    matchKey(e, KEY.UP)   || matchKey(e, KEY.DOWN)) {
+                    // No interceptar — WolfPlayer las maneja con ArrowLeft/Right/Up/Down
+                    return;
+                }
+
+                // Enter → play/pause via WolfPlayer
+                if (matchKey(e, KEY.ENTER)) {
+                    const wolfPlayBtn = document.querySelector('#btnPlay');
+                    if (wolfPlayBtn) { wolfPlayBtn.click(); e.preventDefault(); return; }
+                }
+
+                // Fullscreen via WolfPlayer
+                if (e.key === 'f' || e.key === 'F') {
+                    const wolfFsBtn = document.querySelector('#btnFullscreen');
+                    if (wolfFsBtn) { wolfFsBtn.click(); e.preventDefault(); return; }
+                }
+
+                // Mute via WolfPlayer
+                if (e.key === 'm' || e.key === 'M') {
+                    const wolfMuteBtn = document.querySelector('#btnMute');
+                    if (wolfMuteBtn) { wolfMuteBtn.click(); e.preventDefault(); return; }
+                }
+
+                // Back → cerrar reproductor
+                if (matchKey(e, KEY.BACK)) {
+                    const closeBtn = $('btn-close-player');
+                    if (closeBtn) closeBtn.click();
+                    e.preventDefault(); return;
+                }
+
+                // Play/Pause media keys
+                if (matchKey(e, KEY.PLAY) || matchKey(e, KEY.PLAY_PAUSE)) {
+                    const wolfPlayBtn = document.querySelector('#btnPlay');
+                    if (wolfPlayBtn) wolfPlayBtn.click();
+                    e.preventDefault(); return;
+                }
+                if (matchKey(e, KEY.PAUSE)) {
+                    const v = getActiveVideo();
+                    if (v && !v.paused) { v.pause(); showOSD('⏸ Pausado'); }
+                    e.preventDefault(); return;
+                }
+                if (matchKey(e, KEY.STOP)) {
+                    const v = getActiveVideo();
+                    if (v) { v.pause(); v.currentTime = 0; showOSD('⏹ Detenido'); }
+                    e.preventDefault(); return;
+                }
+
+                // FF / RW dedicados (30s, WolfPlayer hace 10s con flechas)
+                if (matchKey(e, KEY.FF)) {
+                    const v = getActiveVideo();
+                    if (v) { v.currentTime = Math.min(v.duration || 0, v.currentTime + 30); showOSD('▶▶ +30s'); }
+                    e.preventDefault(); return;
+                }
+                if (matchKey(e, KEY.RW)) {
+                    const v = getActiveVideo();
+                    if (v) { v.currentTime = Math.max(0, v.currentTime - 30); showOSD('◀◀ -30s'); }
+                    e.preventDefault(); return;
+                }
+
+                // Teclas de color con WolfPlayer
+                if (matchKey(e, KEY.RED))    { $('btn-close-player')?.click(); e.preventDefault(); return; }
+                if (matchKey(e, KEY.GREEN))  { openTVPicker('lang');   e.preventDefault(); return; }
+                if (matchKey(e, KEY.YELLOW)) {
+                    // Si hay intro visible, omitirla; si no, abrir selector de servidor
+                    const skipBtn = $('vp-skip-intro');
+                    const skipVis = skipBtn && skipBtn.style.opacity !== '0' && skipBtn.style.pointerEvents !== 'none';
+                    if (skipVis) { skipBtn.click(); showOSD('⏭ Intro omitida'); }
+                    else { openTVPicker('server'); }
+                    e.preventDefault(); return;
+                }
+                if (matchKey(e, KEY.BLUE))   { $('btn-report')?.click(); e.preventDefault(); return; }
+
+                return;
+            }
+
+        // ── Overlays flotantes con prioridad máxima ──────
+        // 1. Toast "Continuar viendo"
+        const resumeOverlay = $('vp-resume-overlay');
+        if (resumeOverlay && resumeOverlay.offsetParent !== null) {
+            if (matchKey(e, KEY.LEFT)  || e.key === 'n' || e.key === 'N') {
+                // Desde el inicio
+                resumeOverlay.querySelector('.vp-resume-no')?.click();
+                e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.RIGHT) || matchKey(e, KEY.ENTER)) {
+                // Continuar
+                resumeOverlay.querySelector('.vp-resume-yes')?.click();
+                e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.BACK)) {
+                resumeOverlay.querySelector('.vp-resume-no')?.click();
+                e.preventDefault(); return;
+            }
+            e.preventDefault(); return;
+        }
+
+        // 2. Overlay de autoplay siguiente episodio
+        const autoplayOverlay = document.querySelector('.autoplay-fs-overlay');
+        if (autoplayOverlay && autoplayOverlay.offsetParent !== null) {
+            if (matchKey(e, KEY.ENTER)) {
+                // Reproducir ya (cancelar countdown y reproducir)
+                const cancelBtn = $('fs-cancel-btn');
+                // Enter = aceptar/reproducir siguiente
+                const v = getActiveVideo();
+                if (v) { v.dispatchEvent(new Event('ended')); }
+                e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.BACK) || matchKey(e, KEY.RED)) {
+                // Cancelar autoplay
+                $('fs-cancel-btn')?.click();
+                e.preventDefault(); return;
+            }
+            e.preventDefault(); return;
+        }
+
+        // 3. Botón "Omitir intro" visible
+        const skipIntroBtn = $('vp-skip-intro');
+        const skipVisible = skipIntroBtn &&
+            skipIntroBtn.style.opacity !== '0' &&
+            skipIntroBtn.style.pointerEvents !== 'none';
+        if (skipVisible) {
+            // YELLOW = omitir intro directamente
+            if (matchKey(e, KEY.YELLOW)) {
+                skipIntroBtn.click();
+                showOSD('⏭ Intro omitida');
+                e.preventDefault(); return;
+            }
+        }
+
+            // ── Sin WolfPlayer (video directo o iframe) ───
+            if (matchKey(e, KEY.RIGHT)) {
+                if (focusedEl && focusedEl.closest('#player-header')) {
+                    spatialNavigate('right'); e.preventDefault(); return;
+                }
+                tvSeek(+SEEK_STEP); e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.LEFT)) {
+                if (focusedEl && focusedEl.closest('#player-header')) {
+                    spatialNavigate('left'); e.preventDefault(); return;
+                }
+                tvSeek(-SEEK_STEP); e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.UP))   { spatialNavigate('up');   e.preventDefault(); return; }
+            if (matchKey(e, KEY.DOWN)) { spatialNavigate('down'); e.preventDefault(); return; }
+
+            if (matchKey(e, KEY.ENTER)) {
+                if (focusedEl && focusedEl !== document.body) {
+                    focusedEl.click();
+                } else {
+                    tvPlayPause();
+                }
+                e.preventDefault(); return;
+            }
+
+            if (matchKey(e, KEY.BACK)) {
+                const closeBtn = $('btn-close-player');
+                if (closeBtn) closeBtn.click();
+                e.preventDefault(); return;
+            }
+
+            if (matchKey(e, KEY.PLAY) || matchKey(e, KEY.PLAY_PAUSE)) {
+                tvPlayPause(); e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.PAUSE)) {
+                const v = getActiveVideo();
+                if (v && !v.paused) { v.pause(); showOSD('⏸ Pausado'); }
+                e.preventDefault(); return;
+            }
+            if (matchKey(e, KEY.STOP)) {
+                const v = getActiveVideo();
+                if (v) { v.pause(); v.currentTime = 0; showOSD('⏹ Detenido'); }
+                e.preventDefault(); return;
+            }
+
+            if (matchKey(e, KEY.FF)) { tvSeek(+30); e.preventDefault(); return; }
+            if (matchKey(e, KEY.RW)) { tvSeek(-30); e.preventDefault(); return; }
+
+            if (matchKey(e, KEY.RED))    { $('btn-close-player')?.click(); e.preventDefault(); return; }
+            if (matchKey(e, KEY.GREEN))  { openTVPicker('lang');   e.preventDefault(); return; }
+            if (matchKey(e, KEY.YELLOW)) { openTVPicker('server'); e.preventDefault(); return; }
+            if (matchKey(e, KEY.BLUE))   { $('btn-report')?.click(); e.preventDefault(); return; }
+
+            return;
+        }
+
+        // ── Pantalla de episodios ─────────────────────────
+        if (matchKey(e, KEY.UP))    { spatialNavigate('up');   e.preventDefault(); return; }
+        if (matchKey(e, KEY.DOWN))  { spatialNavigate('down'); e.preventDefault(); return; }
+        if (matchKey(e, KEY.LEFT))  { spatialNavigate('left'); e.preventDefault(); return; }
+        if (matchKey(e, KEY.RIGHT)) { spatialNavigate('right');e.preventDefault(); return; }
+
+        if (matchKey(e, KEY.ENTER)) {
+            if (focusedEl) focusedEl.click();
+            e.preventDefault(); return;
+        }
+
+        if (matchKey(e, KEY.BACK)) {
+            // Si hay modal abierto, cerrarlo
+            const openOverlay = document.querySelector('.tv-picker-overlay') ||
+                                document.querySelector('[style*="display: flex"][id$="overlay"]');
+            if (openOverlay) {
+                const closeBtn = openOverlay.querySelector('[id$="close"], [id$="cancel"]');
+                if (closeBtn) closeBtn.click();
+                else openOverlay.style.display = 'none';
+            } else {
+                // Volver a la página anterior
+                history.back();
+            }
+            e.preventDefault(); return;
+        }
+
+        // Teclas de color en pantalla de episodios
+        if (matchKey(e, KEY.GREEN)) {
+            // Activar/desactivar marcado como visto del episodio enfocado
+            if (focusedEl && focusedEl.classList.contains('ep-card')) {
+                const sw = focusedEl.querySelector('.ep-switch input');
+                if (sw) { sw.checked = !sw.checked; sw.dispatchEvent(new Event('change')); showOSD(sw.checked ? '✓ Marcado visto' : '✗ Desmarcado'); }
+            }
+            e.preventDefault(); return;
+        }
+
+    }, true); // useCapture=true para interceptar antes que otros listeners
+
+    // ── Inicializar foco al cargar ────────────────────────
+    function tryInitFocus() {
+        const els = getFocusable();
+        if (els.length > 0) {
+            setFocus(els[0]);
+        } else {
+            setTimeout(tryInitFocus, 300);
+        }
+    }
+
+    // Re-enfocar al cambiar de sección (episodios ↔ reproductor)
+    const origPlayEpisode = window.playEpisode;
+    if (typeof playEpisode === 'function') {
+        // Patch: cuando abre el player, focar el botón de cerrar
+        const _orig = playEpisode;
+        window.playEpisode = function (...args) {
+            _orig.apply(this, args);
+            setTimeout(() => {
+                const closeBtn = $('btn-close-player');
+                if (closeBtn) setFocus(closeBtn);
+            }, 100);
+        };
+    }
+
+    const origClosePlayer = window.closePlayer;
+    if (typeof closePlayer === 'function') {
+        const _orig = closePlayer;
+        window.closePlayer = function (...args) {
+            _orig.apply(this, args);
+            setTimeout(() => {
+                const els = getFocusable();
+                if (els.length > 0) setFocus(els[0]);
+            }, 100);
+        };
+    }
+
+    // ── Guía de teclas OSD (presionar ? o info) ──────────
+    document.addEventListener('keydown', function(e) {
+        if (e.key === '?' || e.keyCode === 457 /* INFO */) {
+            showOSD(isPlayerOpen()
+                ? '← → Seek | ↑↓ Nav | ENTER Play/Pause | BACK Salir | 🟢 Idioma | 🟡 Servidor'
+                : '↑↓←→ Nav | ENTER Seleccionar | BACK Atrás | 🟢 Marcar visto'
+            );
+        }
+    });
+
+    // ── Click del mouse activa cursor (salir modo TV) ─────
+    document.addEventListener('mousemove', function onMouseMove() {
+        document.body.classList.remove('tv-mode');
+        document.removeEventListener('mousemove', onMouseMove);
+    }, { once: false });
+
+    // ── Re-activar modo TV al presionar tecla ─────────────
+    document.addEventListener('keydown', function() {
+        document.body.classList.add('tv-mode');
+    }, { passive: true });
+
+    // ── Iniciar ───────────────────────────────────────────
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', tryInitFocus);
+    } else {
+        setTimeout(tryInitFocus, 400);
+    }
+
+    // Expo global para debug
+    window._tvNav = { setFocus, getFocusable, showOSD, openTVPicker };
+
+})();

@@ -59,7 +59,7 @@ function updateCWMetadata(currentTime, duration) {
             serieId: SERIE.id,
             serieTitle: SERIE.title,
             poster: ep.thumb || SERIE.poster || SERIE.image || '',
-            serieUrl: 'go:' + SERIE.id,
+            serieUrl: SERIE.urlContinue || '',
             seasonIdx: activeSeason,
             seasonLabel: season ? (season.label || ('Temporada ' + season.num)) : '',
             epNum: ep.num,
@@ -176,13 +176,11 @@ function renderEpisodes(animate) {
     const list = $('episodes-list');
     if (!list) return;
     list.innerHTML = eps.map(ep => {
-        const thumbStyle = ep.thumb
-            ? `background-image:url('${ep.thumb}')`
-            : `background:linear-gradient(135deg,#0a1628,#001a0d)`;
+        const thumbSrc = ep.thumb || '';
         const watched = isWatched(map, activeSeason, ep.num);
         return `<div class="ep-card" data-s="${activeSeason}" data-e="${ep.num}">
       <div class="ep-thumb">
-        <div class="ep-thumb-img" style="${thumbStyle}"></div>
+        <div class="ep-thumb-img"${thumbSrc ? ` data-src="${thumbSrc}"` : ''}></div>
         <div class="ep-thumb-play">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="white" opacity="0.85"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
@@ -204,6 +202,26 @@ function renderEpisodes(animate) {
       </div>
     </div>`;
     }).join('');
+
+    // Lazy load de thumbs con IntersectionObserver
+    list.querySelectorAll('.ep-thumb-img[data-src]').forEach((el, i) => {
+        const observer = new IntersectionObserver((entries, obs) => {
+            entries.forEach(entry => {
+                if (!entry.isIntersecting) return;
+                obs.unobserve(el);
+                const src = el.dataset.src;
+                if (!src) return;
+                const img = new Image();
+                img.onload = img.onerror = () => {
+                    el.style.backgroundImage = `url('${src}')`;
+                    // Pequeño delay escalonado para la animación una a una
+                    setTimeout(() => el.classList.add('ep-img-loaded'), i * 40);
+                };
+                img.src = src;
+            });
+        }, { rootMargin: '300px' });
+        observer.observe(el);
+    });
 
     list.querySelectorAll('.ep-card').forEach(c =>
         c.addEventListener('click', e => {
@@ -249,12 +267,12 @@ function playEpisode(seasonIdx, epNum, animate = false, isAutoAdvance = false) {
     if (lbl) { lbl.textContent = 'Visto'; lbl.classList.add('on'); }
 
     // Global language persistence
-    let prefLang = localStorage.getItem('preferred_lang');
+    let prefLang = localStorage.getItem('blaze_preferred_lang');
     if (prefLang) {
         const pIdx = currentEpisode.langs.findIndex(l => l.name === prefLang);
         activeLang = pIdx !== -1 ? pIdx : 0;
     } else if (!prefLang && currentEpisode.langs.length > 0) {
-        localStorage.setItem('preferred_lang', currentEpisode.langs[0].name);
+        localStorage.setItem('blaze_preferred_lang', currentEpisode.langs[0].name);
         activeLang = 0;
     }
 
@@ -459,7 +477,7 @@ function openPicker(type) {
         if (isLang) {
             activeLang = idx;
             activeServer = 0;
-            localStorage.setItem('preferred_lang', currentEpisode.langs[idx].name);
+            localStorage.setItem('blaze_preferred_lang', currentEpisode.langs[idx].name);
         } else {
             activeServer = idx;
         }
@@ -816,7 +834,7 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
 
         // Idioma y servidor (safe checks)
         if (ep.langs && ep.langs.length > 0) {
-            let prefLang = localStorage.getItem('preferred_lang');
+            let prefLang = localStorage.getItem('blaze_preferred_lang');
             const newLangIdx = prefLang ? ep.langs.findIndex(l => l.name === prefLang) : 0;
             activeLang = newLangIdx >= 0 ? newLangIdx : 0;
             activeServer = 0;
@@ -863,7 +881,7 @@ function updateInterfaceForEpisode(seasonIdx, ep) {
 }
 
 function handleAutoplayNext() {
-    if (localStorage.getItem('autoplay_enabled') !== '1') return;
+    if (localStorage.getItem('blaze_autoplay_enabled') !== '1') return;
     
     let nextEp = null;
     let nextSeasonIdx = activeSeason;
@@ -1251,6 +1269,32 @@ function buildVideoPlayer(wrap, url, poster, videoType, mainLoader, server, requ
                     if (requestId && requestId !== renderCount) return;
                     
                     const errCode = v.error ? v.error.code : 0;
+                    
+                    // Código 2 = MEDIA_ERR_NETWORK (incluye 403 de URLs expiradas)
+                    if (errCode === 2) {
+                        console.warn(`⚠️ Error de red en video (código 2, posible 403). Intentando siguiente servidor...`);
+                        
+                        // Intentar siguiente servidor automáticamente
+                        const currentLang = currentEpisode && currentEpisode.langs && currentEpisode.langs[activeLang];
+                        if (currentLang && currentLang.servers && activeServer < currentLang.servers.length - 1) {
+                            activeServer++;
+                            updateLabels();
+                            wrap.innerHTML = '';
+                            renderPlayer();
+                        } else {
+                            // No hay más servidores, mostrar error
+                            hideLoader();
+                            wrap.innerHTML = `<div class="player-placeholder">
+                              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                              </svg>
+                              <p>Video no disponible</p>
+                              <small>El enlace ha expirado o el servidor no responde. Cambia de idioma o servidor.</small>
+                            </div>`;
+                        }
+                        return;
+                    }
+                    
                     if (errCode !== 4) {
                         console.warn(`⚠️ Ignorando error transitorio en video (código ${errCode}).`);
                         return;

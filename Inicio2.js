@@ -1305,8 +1305,7 @@ function openDialog(dialogId) {
     const dialog = document.getElementById(dialogId);
     if (dialog) {
         dialog.classList.add('show');
-        // Prevenir scroll del body cuando el modal está abierto
-        document.body.style.overflow = 'hidden';
+        // Eliminado body.style.overflow = 'hidden' para evitar parpadeo/salto de layout por la barra de desplazamiento
     }
 }
 
@@ -1315,8 +1314,6 @@ function closeDialog(dialogId) {
     const dialog = document.getElementById(dialogId);
     if (dialog) {
         dialog.classList.remove('show');
-        // Restaurar scroll del body
-        document.body.style.overflow = '';
     }
 }
 
@@ -1398,7 +1395,6 @@ function openSection(sectionId) {
     const section = document.getElementById(sectionId);
     if (section) {
         section.classList.add('show');
-        document.body.style.overflow = 'hidden';
     }
 }
 
@@ -1407,7 +1403,6 @@ function closeSection(sectionId) {
     const section = document.getElementById(sectionId);
     if (section) {
         section.classList.remove('show');
-        document.body.style.overflow = '';
     }
 }
 
